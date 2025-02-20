@@ -1,4 +1,4 @@
-#DIOCANE
+#DIOCANEt
 import discord
 from discord.ext import commands
 import subprocess
