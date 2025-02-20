@@ -58,7 +58,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         return filename, video_title
 
 
-@bot.command(name='test_nuovo')
+@bot.command(name='test_nuovissimo')
 async def test(ctx):
     await ctx.send("prova della modifica")
 
