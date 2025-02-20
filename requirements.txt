@@ -1,0 +1,6 @@
+discord.py
+discord
+python_dotenv
+yt_dlp
+asyncio 
+pynacl
