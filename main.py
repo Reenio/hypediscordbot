@@ -57,6 +57,9 @@ class YTDLSource(discord.PCMVolumeTransformer):
         video_title = data.get('title', None)
         return filename, video_title
 
+@bot.command(name='test_test')
+async def test_test(ctx):
+        await ctx.send("test fr fr")
 
 @bot.command(name='test_nuovissimo')
 async def test(ctx):
