@@ -58,9 +58,10 @@ class YTDLSource(discord.PCMVolumeTransformer):
         return filename, video_title
 
 
-@bot.command(name='test')
+@bot.command(name='test_nuovo')
 async def test(ctx):
     await ctx.send("prova della modifica")
+
     
 @bot.command(name='play', help='Riproduce una canzone o la aggiunge alla queue')
 async def play(ctx, *, url=None):
