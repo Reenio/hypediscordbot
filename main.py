@@ -1,17 +1,15 @@
 import discord
 from discord.ext import commands
-import subprocess
-
 import os, sys
 from dotenv import load_dotenv
-
 import yt_dlp
-
 import asyncio
 
 load_dotenv()
-
 DISCORD_TOKEN = os.getenv("discord_token")
+
+if not os.path.exists("audios"):
+    os.makedirs("audios")
 
 intents = discord.Intents().all()
 bot = commands.Bot(command_prefix='!', intents=intents)
@@ -20,6 +18,7 @@ yt_dlp.utils.bug_reports_message = lambda: ''
 
 ytdl_format_options = {
     'format': 'bestaudio/best',
+    'outtmpl': 'audios/%(title)s.%(ext)s', 
     'restrictfilenames': True,
     'noplaylist': True,
     'nocheckcertificate': True,
@@ -36,10 +35,8 @@ ffmpeg_options = {
 }
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
-queues = {}  # La coda conterrà gli URL delle tracce in attesa
-now_playing = {}  # Qui verrà salvato l'URL della traccia attualmente in riproduzione
-
-
+queues = {}       
+now_playing = {}  
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, volume=0.5):
         super().__init__(source, volume)
@@ -57,16 +54,19 @@ class YTDLSource(discord.PCMVolumeTransformer):
         video_title = data.get('title', None)
         return filename, video_title
 
-@bot.command(name='modificato')
-async def test_test(ctx):
-        await ctx.send("test fr fr")
+def after_play(ctx, guild_id, filename):
+    try:
+        os.remove(filename)
+    except:
+        print("è rotto")
 
-@bot.command(name='test_nuovissimo')
-async def test(ctx):
-    await ctx.send("prova della modifica")
+    fut = asyncio.run_coroutine_threadsafe(play_next(ctx, guild_id), bot.loop)
+    try:
+        fut.result()
+    except Exception as e:
+        print(e)
 
-    
-@bot.command(name='play', help='Riproduce una canzone o la aggiunge alla queue')
+@bot.command(name='play', help='')
 async def play(ctx, *, url=None):
     if not ctx.message.author.voice:
         await ctx.send(f"{ctx.message.author.name} non è connesso nella chat vocale")
@@ -89,7 +89,6 @@ async def play(ctx, *, url=None):
             await ctx.send("Non hai scritto niente.")
             return
 
-        # Se l'URL non è diretto, eseguo la ricerca per ottenere l'URL reale
         if "youtube.com" in url or "youtu.be" in url:
             video_url = url
         else:
@@ -101,19 +100,16 @@ async def play(ctx, *, url=None):
                 await ctx.send("Non ho trovato il video su YouTube, cerca qualcos'altro")
                 return
 
-        # Se non c'è una traccia in riproduzione, riproduco subito e salvo il riferimento in now_playing
         if not ctx.guild.voice_client.is_playing():
             async with ctx.typing():
                 filename, title = await YTDLSource.from_url(video_url, loop=bot.loop)
                 now_playing[guild_id] = video_url
                 ctx.guild.voice_client.play(
                     discord.FFmpegPCMAudio(executable="ffmpeg", source=filename),
-                    after=lambda e: play_next(ctx, guild_id)
+                    after=lambda e, filename=filename: after_play(ctx, guild_id, filename)
                 )
                 await ctx.send(f'**:notes: Adesso sto riproducendo:** *{title}*')
-                os.remove(filename)
         else:
-            # Se già sta riproducendo, aggiungo l'URL alla coda
             queue.append(video_url)
             await ctx.send("Canzone aggiunta nella queue! Usa il comando !queue per vedere la tua richiesta")
 
@@ -122,7 +118,6 @@ async def play(ctx, *, url=None):
     except Exception as e:
         print(e)
         await ctx.send("Il bot non va")
-
 
 async def play_next(ctx, guild_id):
     queue = queues.get(guild_id, [])
@@ -137,46 +132,32 @@ async def play_next(ctx, guild_id):
         filename, title = await YTDLSource.from_url(track, loop=bot.loop)
         voice_channel.play(
             discord.FFmpegPCMAudio(executable="ffmpeg", source=filename),
-            after=lambda e: play_next(ctx, guild_id)
+            after=lambda e, filename=filename: after_play(ctx, guild_id, filename)
         )
         await ctx.send(f'**:notes: Adesso sto riproducendo:** {title}')
-        os.remove(filename)
 
     queues[guild_id] = queue
 
-
-@bot.command(name='skip', help='Skippa la canzone corrente')
+@bot.command(name='skip', help='')
 async def skip(ctx):
     voice_client = ctx.guild.voice_client
 
-    if voice_client:
-        voice_client.stop()
-        guild_id = ctx.guild.id
-        queue = queues.get(guild_id, [])
-
-        # Se ci sono tracce in coda, salto la prima
-        if queue:
-            queue.pop(0)
-
-        if queue:
-            next_song_url = queue[0]
-            now_playing[guild_id] = next_song_url
-            async with ctx.typing():
-                filename, title = await YTDLSource.from_url(next_song_url, loop=bot.loop)
-                voice_client.play(
-                    discord.FFmpegPCMAudio(executable="ffmpeg", source=filename),
-                    after=lambda e: play_next(ctx, guild_id)
-                )
-                await ctx.send(f'**Ho skippato la traccia corrente. Adesso è in riproduzione:** *{title}*')
-                os.remove(filename)
-        else:
-            now_playing[guild_id] = None
-            await ctx.send('Ho skippato la traccia. Non ci sono più tracce nella queue.')
-    else:
+    if not voice_client or not voice_client.is_playing():
         await ctx.send('Nessuna canzone è in riproduzione.')
+        return
 
+    guild_id = ctx.guild.id
+    queue = queues.get(guild_id, [])
 
-@bot.command(name='queue', help='Mostra la coda delle canzoni')
+    voice_client.stop()  
+
+    if queue:  
+        await ctx.send('**Traccia skippata! Passo alla prossima...**')
+        await play_next(ctx, guild_id)
+    else:
+        await ctx.send('**Traccia skippata!** Non ci sono più canzoni in coda.')
+
+@bot.command(name='queue', help='')
 async def show_queue(ctx):
     guild_id = ctx.guild.id
     queue = queues.get(guild_id, [])
@@ -194,8 +175,7 @@ async def show_queue(ctx):
     else:
         await ctx.send('Non ci sono tracce nella queue di questo server!')
 
-
-@bot.command(name='stop', help='Ferma la musica, pulisce la queue ed esce dalla VC')
+@bot.command(name='stop', help='')
 async def stop(ctx):
     voice_client = ctx.guild.voice_client
     if voice_client and voice_client.is_playing():
@@ -211,53 +191,6 @@ async def stop(ctx):
         await ctx.send('Nessuna canzone è in riproduzione')
 
 
-@bot.command(name='queue_debug', help='Mostra la queue (solo per admin)')
-async def queue_debug(ctx):
-    if ctx.author.id != 686397710475067464:
-        await ctx.send("Comando esclusivo per gli admin! Fatti li cazzi tua")
-        return
-
-    if queues:
-        await ctx.send(queues)
-    else:
-        await ctx.send("Nessuno ha riprodotto tracce nel bot!")
-
-
-@bot.command(name='bugfix')
-async def bugfix(ctx, *, message):
-    whitelist = [686397710475067464]
-    if ctx.author.id in whitelist:
-        for guild in bot.guilds:
-            for channel in guild.text_channels:
-                try:
-                    await channel.send(f"`{message}`")
-                except:
-                    pass
-        await ctx.send(f"Messaggio inviato ad {len(bot.guilds)} server!")
-
-
-@bot.command(name='cmd')
-async def cmd(ctx, *, message):
-    whitelist = [686397710475067464]
-    if ctx.author.id in whitelist:
-        cmd_res = subprocess.run([message], stdout=subprocess.PIPE)
-        await ctx.send(f'res: {cmd_res.stdout}')
-    else:
-        await ctx.send("You don't have the permissions to use this command")
-
-
-@bot.command(name='patch')
-async def patch(ctx):
-    whitelist = [686397710475067464]
-    if ctx.author.id in whitelist:
-        if ctx.message.attachments:
-            for attachment in ctx.message.attachments:
-                file_path = os.path.join(os.getcwd(), attachment.filename)
-                await attachment.save(file_path)
-                await ctx.send(f'Il bot è stato Patchato! Salvato il file {attachment.filename} su {file_path}')
-            await ctx.send("Il bot si sta riavviando...")
-            os.execv(sys.executable, ['python'] + sys.argv)
-
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -265,7 +198,6 @@ async def on_voice_state_update(member, before, after):
     if not voice_client:
         return
 
-    # Se il bot è l'unico nel canale vocale
     if len(voice_client.channel.members) == 1:
         guild_id = member.guild.id
 
@@ -287,7 +219,5 @@ async def on_voice_state_update(member, before, after):
 
         await voice_client.disconnect()
 
-
 if __name__ == "__main__":
     bot.run(DISCORD_TOKEN)
-
